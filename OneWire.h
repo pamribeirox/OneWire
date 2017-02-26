@@ -24,6 +24,11 @@
 // is the exception, because it selects a fast but large algorithm
 // or a small but slow algorithm.
 
+// select the two pin interface by defining that
+#ifdef ONEWIRE_SEPARATE_IO
+#define ONEWIRE_SEPARATE_IO 1
+#endif
+
 // you can exclude onewire_search by defining that to 0
 #ifndef ONEWIRE_SEARCH
 #define ONEWIRE_SEARCH 1
@@ -261,7 +266,12 @@ class OneWire
   private:
     IO_REG_TYPE bitmask;
     volatile IO_REG_TYPE *baseReg;
-
+#ifndef ONEWIRE_SEPARATE_IO
+    IO_REG_TYPE bitmask_out;
+    volatile IO_REG_TYPE *baseReg_out;
+	bool txinv;
+#endif
+	
 #if ONEWIRE_SEARCH
     // global search state
     unsigned char ROM_NO[8];
