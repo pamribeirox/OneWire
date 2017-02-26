@@ -141,6 +141,7 @@ sample code bearing this copyright.
 
 #include "OneWire.h"
 
+#ifndef ONEWIRE_SEPARATE_IO
 
 OneWire::OneWire(uint8_t pin)
 {
@@ -152,6 +153,33 @@ OneWire::OneWire(uint8_t pin)
 #endif
 }
 
+#else // ONEWIRE_SEPARATE_IO
+
+/* In this "mode" there will be two pins one dedicated to input (and to optionally power the bus)
+// other dedicated to output, usually driving a MOSFET (in inverted logic mode) or a open drain
+// driver like the 74LXC07
+// With this setup we can have a more stable bus for long cables (I hope!)
+// I haven't done an overloaded constructer because that would complicate the functions and add
+// more runtime overhead (memory & processing)
+*/
+
+OneWire::OneWire(const uint8_t pin_in,const uint8_t pin_out, const bool txinvert /* = false */ )
+{
+	pinMode(pin_in, INPUT);
+	bitmask = PIN_TO_BITMASK(pin_in);
+	baseReg = PIN_TO_BASEREG(pin_in);
+
+	txinv = txinvert;
+	digitalWrite(pin_out,(!txinv)?1:0);
+	pinMode(pin_out, OUTPUT);
+	bitmask_out = PIN_TO_BITMASK(pin_out);
+	baseReg_out = PIN_TO_BASEREG(pin_out);
+#if ONEWIRE_SEARCH
+	reset_search();
+#endif
+}
+
+#endif // ONEWIRE_SEPARATE_IO
 
 // Perform the onewire reset function.  We will wait up to 250uS for
 // the bus to come high, if it doesn't then it is broken or shorted
@@ -163,10 +191,22 @@ uint8_t OneWire::reset(void)
 {
 	IO_REG_TYPE mask = bitmask;
 	volatile IO_REG_TYPE *reg IO_REG_ASM = baseReg;
+#ifdef ONEWIRE_SEPARATE_IO
+	IO_REG_TYPE mask_out = bitmask_out;
+	volatile IO_REG_TYPE *reg_out IO_REG_ASM = baseReg_out;
+#endif
 	uint8_t r;
 	uint8_t retries = 125;
 
 	noInterrupts();
+#ifdef ONEWIRE_SEPARATE_IO
+// guarantee the input pin isn't forcing any level (parasite power) to avoid conflicts
+	DIRECT_MODE_INPUT(reg, mask);
+	if(!txinv)
+		DIRECT_WRITE_HIGH(reg_out, mask_out);
+	else
+		DIRECT_WRITE_LOW(reg_out, mask_out);
+#endif
 	DIRECT_MODE_INPUT(reg, mask);
 	interrupts();
 	// wait until the wire is high... just in case
@@ -176,12 +216,26 @@ uint8_t OneWire::reset(void)
 	} while ( !DIRECT_READ(reg, mask));
 
 	noInterrupts();
+#ifdef ONEWIRE_SEPARATE_IO
+	if(!txinv)
+		DIRECT_WRITE_LOW(reg_out, mask_out);
+	else
+		DIRECT_WRITE_HIGH(reg_out, mask_out);
+#else
 	DIRECT_WRITE_LOW(reg, mask);
 	DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+#endif
 	interrupts();
 	delayMicroseconds(480);
 	noInterrupts();
+#ifdef ONEWIRE_SEPARATE_IO
+	if(!txinv)
+		DIRECT_WRITE_HIGH(reg_out, mask_out);
+	else
+		DIRECT_WRITE_LOW(reg_out, mask_out);
+#else
 	DIRECT_MODE_INPUT(reg, mask);	// allow it to float
+#endif
 	delayMicroseconds(70);
 	r = !DIRECT_READ(reg, mask);
 	interrupts();
@@ -197,20 +251,54 @@ void OneWire::write_bit(uint8_t v)
 {
 	IO_REG_TYPE mask=bitmask;
 	volatile IO_REG_TYPE *reg IO_REG_ASM = baseReg;
+#ifdef ONEWIRE_SEPARATE_IO
+	IO_REG_TYPE mask_out = bitmask_out;
+	volatile IO_REG_TYPE *reg_out IO_REG_ASM = baseReg_out;
+#endif
 
 	if (v & 1) {
 		noInterrupts();
+#ifdef ONEWIRE_SEPARATE_IO
+// guarantee the input pin isn't forcing any level (parasite power) to avoid conflicts
+		DIRECT_MODE_INPUT(reg, mask);
+		if(!txinv)
+			DIRECT_WRITE_LOW(reg_out, mask_out);
+		else
+			DIRECT_WRITE_HIGH(reg_out, mask_out);
+#else
 		DIRECT_WRITE_LOW(reg, mask);
 		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+#endif
 		delayMicroseconds(10);
+#ifdef ONEWIRE_SEPARATE_IO
+		if(!txinv)
+			DIRECT_WRITE_HIGH(reg_out, mask_out);
+		else
+			DIRECT_WRITE_LOW(reg_out, mask_out);
+#else
 		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
+#endif
 		interrupts();
 		delayMicroseconds(55);
 	} else {
 		noInterrupts();
+#ifdef ONEWIRE_SEPARATE_IO
+		if(!txinv)
+			DIRECT_WRITE_LOW(reg_out, mask_out);
+		else
+			DIRECT_WRITE_HIGH(reg_out, mask_out);
+#else
 		DIRECT_WRITE_LOW(reg, mask);
 		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
+#endif
 		delayMicroseconds(65);
+#ifdef ONEWIRE_SEPARATE_IO
+		if(!txinv)
+			DIRECT_WRITE_HIGH(reg_out, mask_out);
+		else
+			DIRECT_WRITE_LOW(reg_out, mask_out);
+		DIRECT_MODE_OUTPUT(reg, mask);	// enable parasite power
+#endif
 		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
 		interrupts();
 		delayMicroseconds(5);
@@ -226,12 +314,32 @@ uint8_t OneWire::read_bit(void)
 	IO_REG_TYPE mask=bitmask;
 	volatile IO_REG_TYPE *reg IO_REG_ASM = baseReg;
 	uint8_t r;
+#ifdef ONEWIRE_SEPARATE_IO
+	IO_REG_TYPE mask_out = bitmask_out;
+	volatile IO_REG_TYPE *reg_out IO_REG_ASM = baseReg_out;
+#endif
 
 	noInterrupts();
+#ifdef ONEWIRE_SEPARATE_IO
+// guarantee the input pin isn't forcing any level (parasite power) to avoid conflicts
+	DIRECT_MODE_INPUT(reg, mask);
+	if(!txinv)
+		DIRECT_WRITE_LOW(reg_out, mask_out);
+	else
+		DIRECT_WRITE_HIGH(reg_out, mask_out);
+#else
 	DIRECT_MODE_OUTPUT(reg, mask);
 	DIRECT_WRITE_LOW(reg, mask);
+#endif
 	delayMicroseconds(3);
+#ifdef ONEWIRE_SEPARATE_IO
+	if(!txinv)
+		DIRECT_WRITE_HIGH(reg_out, mask_out);
+	else
+		DIRECT_WRITE_LOW(reg_out, mask_out);
+#else
 	DIRECT_MODE_INPUT(reg, mask);	// let pin float, pull up will raise
+#endif
 	delayMicroseconds(10);
 	r = DIRECT_READ(reg, mask);
 	interrupts();
